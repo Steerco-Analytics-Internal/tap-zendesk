@@ -1,0 +1,13 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "verified": { "type": ["null", "boolean"] },
+    "primary": { "type": ["null", "boolean"] },
+    "type": { "type": ["null", "string"] },
+    "value": { "type": ["null", "string"] },
+    "user_id": { "type": ["null", "integer"] },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" }
+  }
+}

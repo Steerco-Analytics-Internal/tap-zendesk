@@ -1,0 +1,13 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "item_id": { "type": ["null", "integer"] },
+    "item_type": { "type": ["null", "string"] },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" },
+    "url": { "type": ["null", "string"] },
+    "user_id": { "type": ["null", "integer"] },
+    "value": { "type": ["null", "integer"] }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "url": { "type": ["null", "string"] },
+    "article_id": { "type": ["null", "integer"] },
+    "display_file_name": { "type": ["null", "string"] },
+    "file_name": { "type": ["null", "string"] },
+    "locale": { "type": ["null", "string"] },
+    "content_url": { "type": ["null", "string"] },
+    "relative_path": { "type": ["null", "string"] },
+    "content_type": { "type": ["null", "string"] },
+    "size": { "type": ["null", "integer"] },
+    "inline": { "type": ["null", "boolean"] },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" }
+  }
+}
