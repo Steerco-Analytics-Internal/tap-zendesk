@@ -1,6 +1,6 @@
 import singer
 from singer import utils
-from tap_zendesk.streams import Stream, CursorBasedStream
+from tap_zendesk.streams import Stream
 from tap_zendesk import http
 from tap_zendesk import metrics as zendesk_metrics
 
@@ -180,25 +180,35 @@ class ArticleCommentVotes(Stream):
         pass
 
 
-class Categories(CursorBasedStream):
+class Categories(Stream):
     name = "categories"
     replication_method = "FULL_TABLE"
     endpoint = 'https://{}.zendesk.com/api/v2/help_center/categories'
     item_key = 'categories'
 
+    def get_objects(self):
+        url = self.endpoint.format(self.config['subdomain'])
+        pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
+        for page in pages:
+            yield from page.get(self.item_key, [])
+
     def sync(self, state):
-        categories = self.get_objects()
-        for category in categories:
+        for category in self.get_objects():
             yield (self.stream, category)
 
 
-class Sections(CursorBasedStream):
+class Sections(Stream):
     name = "sections"
     replication_method = "FULL_TABLE"
     endpoint = 'https://{}.zendesk.com/api/v2/help_center/sections'
     item_key = 'sections'
 
+    def get_objects(self):
+        url = self.endpoint.format(self.config['subdomain'])
+        pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
+        for page in pages:
+            yield from page.get(self.item_key, [])
+
     def sync(self, state):
-        sections = self.get_objects()
-        for section in sections:
+        for section in self.get_objects():
             yield (self.stream, section)

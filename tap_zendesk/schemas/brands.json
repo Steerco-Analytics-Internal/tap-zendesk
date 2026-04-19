@@ -3,7 +3,7 @@
   "properties": {
     "id": { "type": ["null", "integer"] },
     "name": { "type": ["null", "string"] },
-    "logo": { "type": ["null", "string"] },
+    "logo": { "type": ["null", "object"], "additionalProperties": true },
     "brand_url": { "type": ["null", "string"] },
     "host_mapping": { "type": ["null", "string"] },
     "subdomain": { "type": ["null", "string"] },

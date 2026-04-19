@@ -3,7 +3,7 @@
   "properties": {
     "id": { "type": ["null", "integer"] },
     "metric": { "type": ["null", "string"] },
-    "time": { "type": ["null", "string"] },
+    "time": { "type": ["null", "string"], "format": "date-time" },
     "instance_id": { "type": ["null", "integer"] },
     "ticket_id": { "type": ["null", "integer"] },
     "type": { "type": ["null", "string"] },

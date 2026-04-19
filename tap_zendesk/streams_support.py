@@ -51,12 +51,18 @@ class Brands(CursorBasedStream):
             yield (self.stream, brand)
 
 
-class CustomRoles(CursorBasedStream):
+class CustomRoles(Stream):
     name = "custom_roles"
     replication_method = "INCREMENTAL"
     replication_key = "updated_at"
     endpoint = 'https://{}.zendesk.com/api/v2/custom_roles'
     item_key = 'custom_roles'
+
+    def get_objects(self):
+        url = self.endpoint.format(self.config['subdomain'])
+        pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
+        for page in pages:
+            yield from page.get(self.item_key, [])
 
     def sync(self, state):
         bookmark = self.get_bookmark(state)
@@ -67,15 +73,20 @@ class CustomRoles(CursorBasedStream):
                 yield (self.stream, role)
 
 
-class DeletedTickets(CursorBasedStream):
+class DeletedTickets(Stream):
     name = "deleted_tickets"
     replication_method = "FULL_TABLE"
     endpoint = 'https://{}.zendesk.com/api/v2/deleted_tickets'
     item_key = 'deleted_tickets'
 
+    def get_objects(self):
+        url = self.endpoint.format(self.config['subdomain'])
+        pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
+        for page in pages:
+            yield from page.get(self.item_key, [])
+
     def sync(self, state):
-        deleted = self.get_objects()
-        for ticket in deleted:
+        for ticket in self.get_objects():
             yield (self.stream, ticket)
 
     def check_access(self):
@@ -122,12 +133,18 @@ class OrganizationMemberships(CursorBasedStream):
                 yield (self.stream, membership)
 
 
-class Schedules(CursorBasedStream):
+class Schedules(Stream):
     name = "schedules"
     replication_method = "INCREMENTAL"
     replication_key = "updated_at"
     endpoint = 'https://{}.zendesk.com/api/v2/business_hours/schedules.json'
     item_key = 'schedules'
+
+    def get_objects(self):
+        url = self.endpoint.format(self.config['subdomain'])
+        pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
+        for page in pages:
+            yield from page.get(self.item_key, [])
 
     def sync(self, state):
         bookmark = self.get_bookmark(state)
@@ -181,8 +198,7 @@ class TicketSkips(CursorBasedStream):
 
     def sync(self, state):
         bookmark = self.get_bookmark(state)
-        params = {'sort_order': 'desc'}
-        skips = self.get_objects(params=params)
+        skips = self.get_objects()
         for skip in skips:
             if utils.strptime_with_tz(skip['updated_at']) >= bookmark:
                 self.update_bookmark(state, skip['updated_at'])
@@ -217,7 +233,7 @@ class UserFields(CursorBasedStream):
             yield (self.stream, field)
 
 
-class UserIdentities(CursorBasedExportStream):
+class UserIdentities(Stream):
     name = "user_identities"
     replication_method = "INCREMENTAL"
     replication_key = "updated_at"
@@ -226,10 +242,27 @@ class UserIdentities(CursorBasedExportStream):
 
     def get_objects(self, start_time):
         url = self.endpoint.format(self.config['subdomain'])
-        for page in http.get_incremental_export(url, self.config['access_token'], self.request_timeout, start_time):
-            if "error" in page and self.item_key not in page:
-                raise Exception("Error: " + page.get("error", {}).get("message", "Error found in the account."))
-            yield from page.get(self.item_key, [])
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Bearer {}'.format(self.config['access_token']),
+        }
+        params = {'start_time': start_time, 'include': 'identities'}
+        if not isinstance(start_time, int):
+            params['start_time'] = int(start_time.timestamp())
+
+        response = http.call_api(url, self.request_timeout, params=params, headers=headers)
+        response_json = response.json()
+        yield from response_json.get(self.item_key, [])
+
+        end_of_stream = response_json.get('end_of_stream')
+        while not end_of_stream:
+            cursor = response_json['after_cursor']
+            params = {'cursor': cursor, 'include': 'identities'}
+            response = http.call_api(url, self.request_timeout, params=params, headers=headers)
+            response_json = response.json()
+            yield from response_json.get(self.item_key, [])
+            end_of_stream = response_json.get('end_of_stream')
 
     def sync(self, state):
         bookmark = self.get_bookmark(state)
