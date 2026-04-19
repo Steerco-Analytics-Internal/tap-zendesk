@@ -1,0 +1,17 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "subject": { "type": ["null", "string"] },
+    "description": { "type": ["null", "string"] },
+    "deleted_at": { "type": ["null", "string"], "format": "date-time" },
+    "previous_state": { "type": ["null", "string"] },
+    "actor": {
+      "type": ["null", "object"],
+      "properties": {
+        "id": { "type": ["null", "integer"] },
+        "name": { "type": ["null", "string"] }
+      }
+    }
+  }
+}

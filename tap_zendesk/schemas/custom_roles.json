@@ -1,0 +1,16 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "name": { "type": ["null", "string"] },
+    "description": { "type": ["null", "string"] },
+    "role_type": { "type": ["null", "integer"] },
+    "team_member_count": { "type": ["null", "integer"] },
+    "configuration": {
+      "type": ["null", "object"],
+      "additionalProperties": true
+    },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" }
+  }
+}

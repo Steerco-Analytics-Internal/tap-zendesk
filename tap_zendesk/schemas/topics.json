@@ -1,0 +1,17 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "name": { "type": ["null", "string"] },
+    "url": { "type": ["null", "string"] },
+    "html_url": { "type": ["null", "string"] },
+    "community_id": { "type": ["null", "integer"] },
+    "description": { "type": ["null", "string"] },
+    "manageable_by": { "type": ["null", "string"] },
+    "follower_count": { "type": ["null", "integer"] },
+    "position": { "type": ["null", "integer"] },
+    "user_segment_id": { "type": ["null", "integer"] },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" }
+  }
+}

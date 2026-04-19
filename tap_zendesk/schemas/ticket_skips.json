@@ -1,0 +1,15 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "ticket_id": { "type": ["null", "integer"] },
+    "user_id": { "type": ["null", "integer"] },
+    "reason": { "type": ["null", "string"] },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" },
+    "ticket": {
+      "type": ["null", "object"],
+      "additionalProperties": true
+    }
+  }
+}

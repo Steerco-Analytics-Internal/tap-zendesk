@@ -631,6 +631,20 @@ class SLAPolicies(Stream):
         '''
         self.client.sla_policies()
 
+from tap_zendesk.streams_help_center import (
+    Articles, ArticleAttachments, ArticleComments, ArticleVotes, ArticleCommentVotes,
+    Categories, Sections,
+)
+from tap_zendesk.streams_community import (
+    Topics, Posts, PostComments, PostVotes, PostCommentVotes,
+)
+from tap_zendesk.streams_support import (
+    AuditLogs, Automations, Brands, CustomRoles, DeletedTickets,
+    OrganizationFields, OrganizationMemberships, Schedules,
+    TicketActivities, TicketMetricEvents, TicketSkips, Triggers,
+    UserFields, UserIdentities,
+)
+
 STREAMS = {
     "tickets": Tickets,
     "groups": Groups,
@@ -646,4 +660,30 @@ STREAMS = {
     "tags": Tags,
     "ticket_metrics": TicketMetrics,
     "sla_policies": SLAPolicies,
+    "articles": Articles,
+    "article_attachments": ArticleAttachments,
+    "article_comments": ArticleComments,
+    "article_votes": ArticleVotes,
+    "article_comment_votes": ArticleCommentVotes,
+    "categories": Categories,
+    "sections": Sections,
+    "topics": Topics,
+    "posts": Posts,
+    "post_comments": PostComments,
+    "post_votes": PostVotes,
+    "post_comment_votes": PostCommentVotes,
+    "audit_logs": AuditLogs,
+    "automations": Automations,
+    "brands": Brands,
+    "custom_roles": CustomRoles,
+    "deleted_tickets": DeletedTickets,
+    "organization_fields": OrganizationFields,
+    "organization_memberships": OrganizationMemberships,
+    "schedules": Schedules,
+    "ticket_activities": TicketActivities,
+    "ticket_metric_events": TicketMetricEvents,
+    "ticket_skips": TicketSkips,
+    "triggers": Triggers,
+    "user_fields": UserFields,
+    "user_identities": UserIdentities,
 }

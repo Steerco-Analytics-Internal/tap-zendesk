@@ -1,0 +1,50 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "title": { "type": ["null", "string"] },
+    "raw_title": { "type": ["null", "string"] },
+    "active": { "type": ["null", "boolean"] },
+    "default": { "type": ["null", "boolean"] },
+    "position": { "type": ["null", "integer"] },
+    "conditions": {
+      "type": ["null", "object"],
+      "properties": {
+        "all": {
+          "type": ["null", "array"],
+          "items": {
+            "type": ["null", "object"],
+            "properties": {
+              "field": { "type": ["null", "string"] },
+              "operator": { "type": ["null", "string"] },
+              "value": { "type": ["null", "string"] }
+            }
+          }
+        },
+        "any": {
+          "type": ["null", "array"],
+          "items": {
+            "type": ["null", "object"],
+            "properties": {
+              "field": { "type": ["null", "string"] },
+              "operator": { "type": ["null", "string"] },
+              "value": { "type": ["null", "string"] }
+            }
+          }
+        }
+      }
+    },
+    "actions": {
+      "type": ["null", "array"],
+      "items": {
+        "type": ["null", "object"],
+        "properties": {
+          "field": { "type": ["null", "string"] },
+          "value": { "type": ["null", "string"] }
+        }
+      }
+    },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" }
+  }
+}

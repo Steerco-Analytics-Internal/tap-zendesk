@@ -1,0 +1,24 @@
+{
+  "type": ["null", "object"],
+  "properties": {
+    "id": { "type": ["null", "integer"] },
+    "actor": {
+      "type": ["null", "object"],
+      "properties": {
+        "id": { "type": ["null", "integer"] },
+        "name": { "type": ["null", "string"] }
+      }
+    },
+    "actor_id": { "type": ["null", "integer"] },
+    "created_at": { "type": ["null", "string"], "format": "date-time" },
+    "description": { "type": ["null", "string"] },
+    "object": { "type": ["null", "object"] },
+    "target": { "type": ["null", "object"] },
+    "title": { "type": ["null", "string"] },
+    "updated_at": { "type": ["null", "string"], "format": "date-time" },
+    "url": { "type": ["null", "string"] },
+    "user": { "type": ["null", "object"] },
+    "user_id": { "type": ["null", "integer"] },
+    "verb": { "type": ["null", "string"] }
+  }
+}
