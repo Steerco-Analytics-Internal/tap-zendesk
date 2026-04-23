@@ -1,4 +1,6 @@
 from time import sleep
+import json
+import os
 import backoff
 import requests
 import singer
@@ -6,6 +8,52 @@ from requests.exceptions import Timeout, HTTPError
 
 
 LOGGER = singer.get_logger()
+
+_refresh_attempted = False
+
+def refresh_access_token(config):
+    """Refresh the OAuth access token using the stored refresh token."""
+    global _refresh_attempted
+    if _refresh_attempted:
+        return False
+
+    required = ('refresh_token', 'client_id', 'client_secret', 'subdomain')
+    if not all(config.get(k) for k in required):
+        return False
+
+    _refresh_attempted = True
+    token_url = 'https://{}.zendesk.com/oauth/tokens'.format(config['subdomain'])
+
+    LOGGER.info("Access token expired, attempting refresh via %s", token_url)
+    try:
+        response = requests.post(token_url, json={
+            'grant_type': 'refresh_token',
+            'refresh_token': config['refresh_token'],
+            'client_id': config['client_id'],
+            'client_secret': config['client_secret'],
+        })
+        response.raise_for_status()
+        data = response.json()
+
+        config['access_token'] = data['access_token']
+        if data.get('refresh_token'):
+            config['refresh_token'] = data['refresh_token']
+
+        config_path = get_config_path()
+        if config_path and os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                on_disk = json.load(f)
+            on_disk['access_token'] = config['access_token']
+            if data.get('refresh_token'):
+                on_disk['refresh_token'] = config['refresh_token']
+            with open(config_path, 'w') as f:
+                json.dump(on_disk, f, indent=2)
+
+        LOGGER.info("Successfully refreshed access token")
+        return True
+    except Exception as e:
+        LOGGER.error("Failed to refresh access token: %s", str(e))
+        return False
 
 
 class ZendeskError(Exception):
@@ -106,6 +154,12 @@ def is_fatal(exception):
         sleep(sleep_time)
         return False
 
+    if status_code == 401:
+        config = get_config()
+        if refresh_access_token(config):
+            return False
+        return True
+
     return 400 <=status_code < 500
 
 def should_retry_error(exception):
@@ -143,6 +197,11 @@ def get_config():
     from tap_zendesk import REQUIRED_CONFIG_KEYS
     parsed_args = singer.utils.parse_args(REQUIRED_CONFIG_KEYS)
     return parsed_args.config
+
+def get_config_path():
+    from tap_zendesk import REQUIRED_CONFIG_KEYS
+    parsed_args = singer.utils.parse_args(REQUIRED_CONFIG_KEYS)
+    return parsed_args.config_path
 @backoff.on_exception(backoff.expo,
                       (ZendeskConflictError),
                       max_tries=10,
@@ -161,8 +220,11 @@ def call_api(url, request_timeout, params, headers):
         headers["X-Zendesk-Marketplace-Name"] = config.get("marketplace_name")
         headers["X-Zendesk-Marketplace-Organization-Id"] = config.get("marketplace_organization")
         headers["X-Zendesk-Marketplace-App-Id"] = config.get("marketplace_app_id")
-        
-    response = requests.get(url, params=params, headers=headers, timeout=request_timeout) # Pass request timeout
+
+    if config.get("access_token") and 'Authorization' in headers:
+        headers['Authorization'] = 'Bearer {}'.format(config['access_token'])
+
+    response = requests.get(url, params=params, headers=headers, timeout=request_timeout)
     raise_for_error(response)
     return response
 
