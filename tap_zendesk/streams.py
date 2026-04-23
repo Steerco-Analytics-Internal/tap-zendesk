@@ -147,7 +147,7 @@ class CursorBasedExportStream(Stream):
 
     def check_access(self):
         url = self.endpoint.format(self.config['subdomain'])
-        start_time = datetime.datetime.strptime(self.config['start_date'], START_DATE_FORMAT).timestamp()
+        start_time = int(datetime.datetime.strptime(self.config['start_date'], START_DATE_FORMAT).timestamp())
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         http.call_api(url, self.request_timeout, params={'start_time': start_time, 'per_page': 1}, headers=HEADERS)
 
