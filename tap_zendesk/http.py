@@ -10,6 +10,11 @@ from requests.exceptions import Timeout, HTTPError
 LOGGER = singer.get_logger()
 
 _refresh_attempted = False
+_zenpy_client = None
+
+def set_zenpy_client(client):
+    global _zenpy_client
+    _zenpy_client = client
 
 def refresh_access_token(config):
     """Refresh the OAuth access token using the stored refresh token."""
@@ -48,6 +53,12 @@ def refresh_access_token(config):
                 on_disk['refresh_token'] = config['refresh_token']
             with open(config_path, 'w') as f:
                 json.dump(on_disk, f, indent=2)
+
+        if _zenpy_client is not None and hasattr(_zenpy_client, 'users'):
+            _zenpy_client.users.session.headers.update({
+                'Authorization': 'Bearer {}'.format(config['access_token'])
+            })
+            LOGGER.info("Updated Zenpy client session with refreshed token")
 
         LOGGER.info("Successfully refreshed access token")
         return True

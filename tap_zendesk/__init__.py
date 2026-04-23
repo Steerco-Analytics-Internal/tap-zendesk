@@ -10,6 +10,7 @@ import singer
 from singer import metadata, metrics as singer_metrics
 from tap_zendesk import metrics as zendesk_metrics
 from tap_zendesk.discover import discover_streams
+from tap_zendesk import http as tap_http
 from tap_zendesk.streams import STREAMS
 from tap_zendesk.sync import sync_stream
 
@@ -205,7 +206,8 @@ def main():
     # OAuth has precedence
     creds = oauth_auth(parsed_args) or api_token_auth(parsed_args)
     session = get_session(parsed_args.config)
-    client = Zenpy(session=session, timeout=request_timeout, **creds) # Pass request timeout
+    client = Zenpy(session=session, timeout=request_timeout, **creds)
+    tap_http.set_zenpy_client(client)
 
     if not client:
         LOGGER.error("""No suitable authentication keys provided.""")
