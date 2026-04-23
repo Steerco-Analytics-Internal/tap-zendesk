@@ -273,7 +273,7 @@ class UserIdentities(Stream):
             yield (self.stream, identity)
 
     def check_access(self):
-        start_time = datetime.datetime.utcnow().strftime(START_DATE_FORMAT)
+        start_time = int(datetime.datetime.utcnow().timestamp())
         url = self.endpoint.format(self.config['subdomain'])
         headers = {
             'Content-Type': 'application/json',

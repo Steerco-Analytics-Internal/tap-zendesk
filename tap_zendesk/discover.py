@@ -3,7 +3,7 @@ import json
 import singer
 import zenpy
 from tap_zendesk.streams import STREAMS
-from tap_zendesk.http import ZendeskForbidden
+from tap_zendesk.http import ZendeskForbidden, ZendeskBadRequest
 
 LOGGER = singer.get_logger()
 
@@ -40,7 +40,10 @@ def discover_streams(client, config):
             # raise forbidden error with proper message containing stream names.
             stream.check_access()
         except ZendeskForbidden as e:
-            error_list.append(stream.name) # Append stream name to the error_list
+            error_list.append(stream.name)
+        except ZendeskBadRequest as e:
+            LOGGER.warning("Bad request for stream %s during check_access: %s", stream.name, str(e))
+            error_list.append(stream.name)
         except zenpy.lib.exception.APIException as e:
             args0 = json.loads(e.args[0])
             err = args0.get('error')
