@@ -9,11 +9,9 @@ from singer import Transformer
 
 LOGGER = singer.get_logger()
 
-# Sentinel that streams yield to indicate "all records up to this point have
-# been emitted; the in-memory state's bookmark is safe to durably commit."
-# sync_stream recognizes the sentinel and emits singer.write_state on a
-# parent-count modulo so multi-day syncs make incremental progress instead
-# of restarting from the previous successful bookmark on every failure.
+# Streams yield CHECKPOINT_SENTINEL between safe commit points so
+# sync_stream can persist state mid-stream. Without this, multi-day syncs
+# would replay from the previous successful bookmark on every failure.
 CHECKPOINT_SENTINEL = object()
 
 DEFAULT_CHECKPOINT_EVERY = 100
@@ -46,9 +44,8 @@ def sync_stream(state, start_date, instance):
         for (stream, record) in instance.sync(state):
             if stream is CHECKPOINT_SENTINEL:
                 checkpoints_seen += 1
-                # Only INCREMENTAL streams have a meaningful bookmark to
-                # persist mid-stream. FULL_TABLE replays from scratch on
-                # the next run, so a partial-progress write is wasted.
+                # FULL_TABLE replays from scratch each run, so a mid-stream
+                # state write is meaningless — only commit for INCREMENTAL.
                 if (
                     instance.replication_method == "INCREMENTAL"
                     and checkpoints_seen % checkpoint_every == 0

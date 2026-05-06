@@ -11,11 +11,9 @@ from requests.exceptions import Timeout, HTTPError
 
 LOGGER = singer.get_logger()
 
-# Earliest epoch time at which the next refresh is allowed. Replaces a
-# one-shot _refresh_attempted flag that prevented multi-day syncs from
-# refreshing more than once. Rate-limiting (rather than a hard cap)
-# prevents infinite refresh loops on a real auth failure while letting
-# long-running jobs survive multiple token TTLs.
+# Earliest monotonic time at which the next refresh is allowed.
+# Rate-limiting (rather than a one-shot flag) lets long syncs survive
+# repeated token expiries without enabling infinite refresh loops.
 _next_refresh_allowed_at = 0.0
 _refresh_lock = threading.Lock()
 MIN_REFRESH_INTERVAL_SEC = 30.0
@@ -29,10 +27,6 @@ def set_zenpy_client(client):
 def refresh_access_token(config):
     """Refresh the OAuth access token using the stored refresh token."""
     global _next_refresh_allowed_at
-    # Lock the cool-down check-and-set so two threads hitting an expired
-    # token simultaneously can't both pass the gate and POST to the
-    # token endpoint. Whichever thread enters the critical section first
-    # bumps the cool-down before releasing; the other returns False.
     with _refresh_lock:
         now = time.monotonic()
         if now < _next_refresh_allowed_at:

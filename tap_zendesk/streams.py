@@ -17,9 +17,6 @@ from tap_zendesk.sync import CHECKPOINT_SENTINEL
 from dateutil.parser import isoparse
 
 
-# Pre-fetch sub-streams for upcoming tickets while the current ticket's
-# records are being emitted. Bounded queue keeps memory predictable on
-# tickets with many audits/comments. Configurable via tap config.
 DEFAULT_SUBSTREAM_WORKERS = 6
 
 
@@ -308,30 +305,39 @@ class Tickets(CursorBasedExportStream):
             or comments_stream.is_selected()
         )
 
+        def _fetch_or_404(stream_obj, fetch_fn, ticket_id):
+            try:
+                return fetch_fn()
+            except http.ZendeskNotFound:
+                LOGGER.warning(
+                    "Unable to retrieve %s for ticket (ID: %s), record not found",
+                    stream_obj.name, ticket_id,
+                )
+                return []
+
         def fetch_substreams(ticket_id):
-            """Pure-HTTP sub-stream fetch. Runs on worker threads — must not
-            mutate state. Returns (audits_records, metrics_records,
-            comments_records). Each is None if the stream is unselected, [] on
-            permission/404, or a list of records."""
+            """Pure-HTTP sub-stream fetch. Runs on worker threads; must not
+            touch state. Returns (audits, metrics, comments) — each is
+            None when the stream is unselected, [] on 404, or a list."""
             audits = metrics = comments = None
             if audits_stream.is_selected():
-                try:
-                    audits = list(audits_stream.get_objects(ticket_id))
-                except http.ZendeskNotFound:
-                    audits = []
-                    LOGGER.warning("Unable to retrieve audits for ticket (ID: %s), record not found", ticket_id)
+                audits = _fetch_or_404(
+                    audits_stream,
+                    lambda: list(audits_stream.get_objects(ticket_id)),
+                    ticket_id,
+                )
             if metrics_stream.is_selected():
-                try:
-                    metrics = list(metrics_stream.get_objects(ticket_id))
-                except http.ZendeskNotFound:
-                    metrics = []
-                    LOGGER.warning("Unable to retrieve metrics for ticket (ID: %s), record not found", ticket_id)
+                metrics = _fetch_or_404(
+                    metrics_stream,
+                    lambda: list(metrics_stream.get_objects(ticket_id)),
+                    ticket_id,
+                )
             if comments_stream.is_selected():
-                try:
-                    comments = comments_stream.fetch_records(ticket_id)
-                except http.ZendeskNotFound:
-                    comments = []
-                    LOGGER.warning("Unable to retrieve comments for ticket (ID: %s), record not found", ticket_id)
+                comments = _fetch_or_404(
+                    comments_stream,
+                    lambda: comments_stream.fetch_records(ticket_id),
+                    ticket_id,
+                )
             return audits, metrics, comments
 
         def emit_ticket(ticket, audits, metrics, comments):
@@ -339,32 +345,27 @@ class Tickets(CursorBasedExportStream):
             generated_timestamp_dt = datetime.datetime.utcfromtimestamp(
                 ticket.get('generated_timestamp')
             ).replace(tzinfo=pytz.UTC)
-            ticket.pop('fields')  # duplicate of custom_fields
+            ticket.pop('fields')
             yield (self.stream, ticket)
 
-            if audits is not None:
-                for audit in audits:
-                    zendesk_metrics.capture('ticket_audit')
-                    audits_stream.count += 1
-                    yield (audits_stream.stream, audit)
-            if metrics is not None:
-                for metric in metrics:
-                    zendesk_metrics.capture('ticket_metric')
-                    metrics_stream.count += 1
-                    yield (metrics_stream.stream, metric)
+            for audit in audits or []:
+                zendesk_metrics.capture('ticket_audit')
+                audits_stream.count += 1
+                yield (audits_stream.stream, audit)
+            for metric in metrics or []:
+                zendesk_metrics.capture('ticket_metric')
+                metrics_stream.count += 1
+                yield (metrics_stream.stream, metric)
             if comments is not None:
-                # process_records mutates state (per-ticket bookmarks); main
-                # thread only — no race with worker fetches.
+                # process_records mutates state and must run main-thread only
                 yield from comments_stream.process_records(ticket['id'], comments, state)
 
-            # Bookmark advances only after all sub-streams for this ticket
-            # have been emitted; the sentinel that follows is a safe commit
-            # point for sync_stream to call singer.write_state.
+            # Bookmark advances after all sub-streams for this ticket have
+            # been emitted; the sentinel that follows is a safe commit point.
             self.update_bookmark(state, utils.strftime(generated_timestamp_dt))
             yield (CHECKPOINT_SENTINEL, None)
 
         if not any_sub_selected:
-            # No sub-streams to fetch — skip the executor entirely.
             for ticket in tickets:
                 yield from emit_ticket(ticket, None, None, None)
             emit_sub_stream_metrics(audits_stream)
@@ -372,11 +373,8 @@ class Tickets(CursorBasedExportStream):
             emit_sub_stream_metrics(comments_stream)
             return
 
-        # Prime TicketComments.starting_state before any worker fetches
-        # run. The original code captured starting_state lazily on the
-        # first comment; under concurrency that capture would be sensitive
-        # to the order workers complete in. Doing it once up-front locks
-        # in the comment fallback bookmark deterministically.
+        # Prime starting_state once up-front so the comment-bookmark
+        # fallback doesn't depend on worker completion order.
         if comments_stream.is_selected() and not comments_stream.starting_state:
             primed_state = singer.bookmarks.ensure_bookmark_path(
                 state,
@@ -389,10 +387,6 @@ class Tickets(CursorBasedExportStream):
                 comments_stream.replication_key,
             ) or {}
 
-        # Pipelined pre-fetch: keep `worker_count` sub-stream fetches in
-        # flight at any time. The main loop emits records strictly in ticket
-        # order, but the network work for upcoming tickets happens in
-        # parallel with the current ticket's emission.
         executor = ThreadPoolExecutor(max_workers=worker_count)
         try:
             in_flight = deque()
@@ -417,9 +411,8 @@ class Tickets(CursorBasedExportStream):
                 yield from emit_ticket(ticket, audits, metrics, comments)
                 submit_next()
         finally:
-            # cancel_futures avoids burning rate-limit quota on
-            # already-queued sub-stream fetches when an exception unwinds
-            # the generator (e.g. an unhandled error from future.result()).
+            # On exception, drop already-queued fetches instead of burning
+            # rate-limit quota completing them.
             executor.shutdown(wait=True, cancel_futures=True)
 
         emit_sub_stream_metrics(audits_stream)
@@ -479,13 +472,6 @@ class TicketMetrics(CursorBasedStream):
     item_key = 'ticket_metric'
 
     def get_objects(self, ticket_id):
-        """Yield unwrapped ticket_metric records. Threadsafe — no state
-        mutation, no metric counters. Used by Tickets.sync's worker pool.
-
-        Raises KeyError if a page lacks the expected ``ticket_metric`` key,
-        matching the original behavior where missing data was loud rather
-        than silently skipped.
-        """
         url = self.endpoint.format(self.config['subdomain'], ticket_id)
         pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
         for page in pages:
@@ -530,8 +516,7 @@ class TicketComments(Stream):
                 yield from items
 
     def fetch_records(self, ticket_id):
-        """HTTP-only fetch for one ticket's comments. Threadsafe — does not
-        touch state. Returns a list of comment dicts with ticket_id stamped."""
+        """HTTP-only; threadsafe. Pair with process_records on the main thread."""
         records = []
         for ticket_comment in self.get_objects(ticket_id):
             ticket_comment['ticket_id'] = ticket_id
@@ -539,8 +524,7 @@ class TicketComments(Stream):
         return records
 
     def process_records(self, ticket_id, records, state):
-        """Apply per-ticket bookmark logic and yield records that should be
-        emitted. Mutates state — main-thread only, must not run concurrently."""
+        """Mutates state — main-thread only."""
         for ticket_comment in records:
             if not self.starting_state:
                 state = singer.bookmarks.ensure_bookmark_path(state, ['bookmarks', self.name, self.replication_key])
