@@ -6,12 +6,18 @@ import pytz
 import zenpy
 import copy
 import singer
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from singer import metadata
 from singer import utils
 from singer.metrics import Point
 from tap_zendesk import metrics as zendesk_metrics
 from tap_zendesk import http
+from tap_zendesk.sync import CHECKPOINT_SENTINEL
 from dateutil.parser import isoparse
+
+
+DEFAULT_SUBSTREAM_WORKERS = 6
 
 
 LOGGER = singer.get_logger()
@@ -275,7 +281,6 @@ class Tickets(CursorBasedExportStream):
     def sync(self, state): #pylint: disable=too-many-statements
 
         bookmark = self.get_bookmark(state)
-
         tickets = self.get_objects(bookmark)
 
         audits_stream = TicketAudits(self.client, self.config)
@@ -293,54 +298,126 @@ class Tickets(CursorBasedExportStream):
         if audits_stream.is_selected():
             LOGGER.info("Syncing ticket_audits per ticket...")
 
-        for ticket in tickets:
+        worker_count = max(1, int(self.config.get('substream_workers') or DEFAULT_SUBSTREAM_WORKERS))
+        any_sub_selected = (
+            audits_stream.is_selected()
+            or metrics_stream.is_selected()
+            or comments_stream.is_selected()
+        )
+
+        def _fetch_or_404(stream_obj, fetch_fn, ticket_id):
+            try:
+                return fetch_fn()
+            except http.ZendeskNotFound:
+                LOGGER.warning(
+                    "Unable to retrieve %s for ticket (ID: %s), record not found",
+                    stream_obj.name, ticket_id,
+                )
+                return []
+
+        def fetch_substreams(ticket_id):
+            """Pure-HTTP sub-stream fetch. Runs on worker threads; must not
+            touch state. Returns (audits, metrics, comments) — each is
+            None when the stream is unselected, [] on 404, or a list."""
+            audits = metrics = comments = None
+            if audits_stream.is_selected():
+                audits = _fetch_or_404(
+                    audits_stream,
+                    lambda: list(audits_stream.get_objects(ticket_id)),
+                    ticket_id,
+                )
+            if metrics_stream.is_selected():
+                metrics = _fetch_or_404(
+                    metrics_stream,
+                    lambda: list(metrics_stream.get_objects(ticket_id)),
+                    ticket_id,
+                )
+            if comments_stream.is_selected():
+                comments = _fetch_or_404(
+                    comments_stream,
+                    lambda: comments_stream.fetch_records(ticket_id),
+                    ticket_id,
+                )
+            return audits, metrics, comments
+
+        def emit_ticket(ticket, audits, metrics, comments):
             zendesk_metrics.capture('ticket')
-
-            generated_timestamp_dt = datetime.datetime.utcfromtimestamp(ticket.get('generated_timestamp')).replace(tzinfo=pytz.UTC)
-
-            self.update_bookmark(state, utils.strftime(generated_timestamp_dt))
-
-            ticket.pop('fields') # NB: Fields is a duplicate of custom_fields, remove before emitting
-            # yielding stream name with record in a tuple as it is used for obtaining only the parent records while sync
+            generated_timestamp_dt = datetime.datetime.utcfromtimestamp(
+                ticket.get('generated_timestamp')
+            ).replace(tzinfo=pytz.UTC)
+            ticket.pop('fields')
             yield (self.stream, ticket)
 
-            if audits_stream.is_selected():
-                try:
-                    for audit in audits_stream.sync(ticket["id"]):
-                        yield audit
-                except http.ZendeskNotFound:
-                    # Skip stream if ticket_audit does not found for particular ticekt_id. Earlier it throwing HTTPError
-                    # but now as error handling updated, it throws ZendeskNotFound.
-                    message = "Unable to retrieve audits for ticket (ID: {}), record not found".format(ticket['id'])
-                    LOGGER.warning(message)
+            for audit in audits or []:
+                zendesk_metrics.capture('ticket_audit')
+                audits_stream.count += 1
+                yield (audits_stream.stream, audit)
+            for metric in metrics or []:
+                zendesk_metrics.capture('ticket_metric')
+                metrics_stream.count += 1
+                yield (metrics_stream.stream, metric)
+            if comments is not None:
+                # process_records mutates state and must run main-thread only
+                yield from comments_stream.process_records(ticket['id'], comments, state)
 
-            if metrics_stream.is_selected():
-                try:
-                    for metric in metrics_stream.sync(ticket["id"]):
-                        yield metric
-                except http.ZendeskNotFound:
-                    # Skip stream if ticket_metric does not found for particular ticekt_id. Earlier it throwing HTTPError
-                    # but now as error handling updated, it throws ZendeskNotFound.
-                    message = "Unable to retrieve metrics for ticket (ID: {}), record not found".format(ticket['id'])
-                    LOGGER.warning(message)
+            # Bookmark advances after all sub-streams for this ticket have
+            # been emitted; the sentinel that follows is a safe commit point.
+            self.update_bookmark(state, utils.strftime(generated_timestamp_dt))
+            yield (CHECKPOINT_SENTINEL, None)
 
-            if comments_stream.is_selected():
-                try:
-                    # add ticket_id to ticket_comment so the comment can
-                    # be linked back to it's corresponding ticket
-                    for comment in comments_stream.sync(ticket["id"], state):
-                        yield comment
-                except http.ZendeskNotFound:
-                    # Skip stream if ticket_comment does not found for particular ticekt_id. Earlier it throwing HTTPError
-                    # but now as error handling updated, it throws ZendeskNotFound.
-                    message = "Unable to retrieve comments for ticket (ID: {}), record not found".format(ticket['id'])
-                    LOGGER.warning(message)
+        if not any_sub_selected:
+            for ticket in tickets:
+                yield from emit_ticket(ticket, None, None, None)
+            emit_sub_stream_metrics(audits_stream)
+            emit_sub_stream_metrics(metrics_stream)
+            emit_sub_stream_metrics(comments_stream)
+            return
 
-            # singer.write_state(state)
+        # Prime starting_state once up-front so the comment-bookmark
+        # fallback doesn't depend on worker completion order.
+        if comments_stream.is_selected() and not comments_stream.starting_state:
+            primed_state = singer.bookmarks.ensure_bookmark_path(
+                state,
+                ['bookmarks', comments_stream.name, comments_stream.replication_key],
+            )
+            comments_stream.starting_state = copy.deepcopy(primed_state)
+            comments_stream.starting_bookmark = singer.get_bookmark(
+                comments_stream.starting_state,
+                comments_stream.name,
+                comments_stream.replication_key,
+            ) or {}
+
+        executor = ThreadPoolExecutor(max_workers=worker_count)
+        try:
+            in_flight = deque()
+            tickets_iter = iter(tickets)
+
+            def submit_next():
+                try:
+                    ticket = next(tickets_iter)
+                except StopIteration:
+                    return False
+                future = executor.submit(fetch_substreams, ticket['id'])
+                in_flight.append((ticket, future))
+                return True
+
+            for _ in range(worker_count):
+                if not submit_next():
+                    break
+
+            while in_flight:
+                ticket, future = in_flight.popleft()
+                audits, metrics, comments = future.result()
+                yield from emit_ticket(ticket, audits, metrics, comments)
+                submit_next()
+        finally:
+            # On exception, drop already-queued fetches instead of burning
+            # rate-limit quota completing them.
+            executor.shutdown(wait=True, cancel_futures=True)
+
         emit_sub_stream_metrics(audits_stream)
         emit_sub_stream_metrics(metrics_stream)
         emit_sub_stream_metrics(comments_stream)
-        # singer.write_state(state)
 
     def check_access(self):
         '''
@@ -394,15 +471,17 @@ class TicketMetrics(CursorBasedStream):
     endpoint = 'https://{}.zendesk.com/api/v2/tickets/{}/metrics'
     item_key = 'ticket_metric'
 
-    def sync(self, ticket_id):
-        # Only 1 ticket metric per ticket
+    def get_objects(self, ticket_id):
         url = self.endpoint.format(self.config['subdomain'], ticket_id)
-        # Pass `request_timeout`
         pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
         for page in pages:
+            yield page[self.item_key]
+
+    def sync(self, ticket_id):
+        for metric in self.get_objects(ticket_id):
             zendesk_metrics.capture('ticket_metric')
             self.count += 1
-            yield (self.stream, page[self.item_key])
+            yield (self.stream, metric)
 
     def check_access(self):
         '''
@@ -436,9 +515,17 @@ class TicketComments(Stream):
             if items:
                 yield from items
 
-    def sync(self, ticket_id, state):
+    def fetch_records(self, ticket_id):
+        """HTTP-only; threadsafe. Pair with process_records on the main thread."""
+        records = []
         for ticket_comment in self.get_objects(ticket_id):
             ticket_comment['ticket_id'] = ticket_id
+            records.append(ticket_comment)
+        return records
+
+    def process_records(self, ticket_id, records, state):
+        """Mutates state — main-thread only."""
+        for ticket_comment in records:
             if not self.starting_state:
                 state = singer.bookmarks.ensure_bookmark_path(state, ['bookmarks', self.name, self.replication_key])
                 # If bookmark is not available for ticket_comments, then check for bookmark for tickets
@@ -448,8 +535,6 @@ class TicketComments(Stream):
                 self.starting_state = copy.deepcopy(state)
                 self.starting_bookmark = singer.get_bookmark(self.starting_state, self.name, self.replication_key)
 
-
-            # created_at
             created_at = ticket_comment.get('created_at')
             current_bookmark = singer.get_bookmark(state, self.name, self.replication_key)
             if not current_bookmark.get(ticket_id):
@@ -458,17 +543,21 @@ class TicketComments(Stream):
                 current_bookmark = utils.strptime_with_tz(current_bookmark.get(ticket_id))
                 if created_at and utils.strptime_with_tz(created_at) > current_bookmark:
                     state['bookmarks'][self.name][self.replication_key][ticket_id] = created_at
-            
+
             if self.starting_bookmark.get(str(ticket_id)):
                 ticket_bookmark = utils.strptime_with_tz(self.starting_bookmark.get(str(ticket_id)))
             elif self.starting_state['bookmarks'].get("tickets").get(Tickets.replication_key):
                 ticket_bookmark = utils.strptime_with_tz(self.starting_state["bookmarks"].get("tickets").get(Tickets.replication_key))
-            else: 
+            else:
                 ticket_bookmark = utils.strptime_with_tz(self.config.get("start_date"))
             if utils.strptime_with_tz(created_at) > ticket_bookmark:
                 yield (self.stream, ticket_comment)
                 zendesk_metrics.capture('ticket_comment')
                 self.count += 1
+
+    def sync(self, ticket_id, state):
+        records = self.fetch_records(ticket_id)
+        yield from self.process_records(ticket_id, records, state)
 
     def check_access(self):
         '''

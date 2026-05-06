@@ -1,3 +1,5 @@
+import threading
+import time
 from time import sleep
 import json
 import os
@@ -9,7 +11,13 @@ from requests.exceptions import Timeout, HTTPError
 
 LOGGER = singer.get_logger()
 
-_refresh_attempted = False
+# Earliest monotonic time at which the next refresh is allowed.
+# Rate-limiting (rather than a one-shot flag) lets long syncs survive
+# repeated token expiries without enabling infinite refresh loops.
+_next_refresh_allowed_at = 0.0
+_refresh_lock = threading.Lock()
+MIN_REFRESH_INTERVAL_SEC = 30.0
+
 _zenpy_client = None
 
 def set_zenpy_client(client):
@@ -18,15 +26,22 @@ def set_zenpy_client(client):
 
 def refresh_access_token(config):
     """Refresh the OAuth access token using the stored refresh token."""
-    global _refresh_attempted
-    if _refresh_attempted:
-        return False
+    global _next_refresh_allowed_at
+    with _refresh_lock:
+        now = time.monotonic()
+        if now < _next_refresh_allowed_at:
+            LOGGER.warning(
+                "Suppressing token refresh; next attempt allowed in %.1fs",
+                _next_refresh_allowed_at - now,
+            )
+            return False
 
-    required = ('refresh_token', 'client_id', 'client_secret', 'subdomain')
-    if not all(config.get(k) for k in required):
-        return False
+        required = ('refresh_token', 'client_id', 'client_secret', 'subdomain')
+        if not all(config.get(k) for k in required):
+            return False
 
-    _refresh_attempted = True
+        _next_refresh_allowed_at = now + MIN_REFRESH_INTERVAL_SEC
+
     token_url = 'https://{}.zendesk.com/oauth/tokens'.format(config['subdomain'])
 
     LOGGER.info("Access token expired, attempting refresh via %s", token_url)

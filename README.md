@@ -40,4 +40,11 @@ For a simplified, but less granular setup, you can use the API Token authenticat
 ```
 - `request_timeout` (integer, `300`):It is the time for which request should wait to get response. It is an optional parameter and default request_timeout is 300 seconds.
 
+## Performance & resilience tuning
+
+Two optional config keys control how the tap behaves during long-running syncs (e.g. an initial backfill of a large customer's tickets):
+
+- `substream_workers` (integer, `6`): number of concurrent worker threads that pre-fetch ticket sub-streams (audits, metrics, comments) ahead of the main emission loop. Records are still emitted in ticket order, but the network calls for upcoming tickets pipeline in parallel. Stay within your Zendesk plan's per-minute API quota — at Enterprise (700 req/min) `6`–`8` is comfortable. Set to `1` to disable concurrency entirely.
+- `checkpoint_every` (integer, `100`): how often (in completed parent tickets) the tap emits a Singer `STATE` message. Smaller values give finer-grained resumability at the cost of more state churn. The default is fine for most syncs; lower it (e.g. `25`) if jobs are getting interrupted often.
+
 Copyright &copy; 2018 Stitch
