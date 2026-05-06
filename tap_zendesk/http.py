@@ -1,3 +1,4 @@
+import threading
 import time
 from time import sleep
 import json
@@ -16,6 +17,7 @@ LOGGER = singer.get_logger()
 # prevents infinite refresh loops on a real auth failure while letting
 # long-running jobs survive multiple token TTLs.
 _next_refresh_allowed_at = 0.0
+_refresh_lock = threading.Lock()
 MIN_REFRESH_INTERVAL_SEC = 30.0
 
 _zenpy_client = None
@@ -27,21 +29,25 @@ def set_zenpy_client(client):
 def refresh_access_token(config):
     """Refresh the OAuth access token using the stored refresh token."""
     global _next_refresh_allowed_at
-    now = time.monotonic()
-    if now < _next_refresh_allowed_at:
-        LOGGER.warning(
-            "Suppressing token refresh; next attempt allowed in %.1fs",
-            _next_refresh_allowed_at - now,
-        )
-        return False
+    # Lock the cool-down check-and-set so two threads hitting an expired
+    # token simultaneously can't both pass the gate and POST to the
+    # token endpoint. Whichever thread enters the critical section first
+    # bumps the cool-down before releasing; the other returns False.
+    with _refresh_lock:
+        now = time.monotonic()
+        if now < _next_refresh_allowed_at:
+            LOGGER.warning(
+                "Suppressing token refresh; next attempt allowed in %.1fs",
+                _next_refresh_allowed_at - now,
+            )
+            return False
 
-    required = ('refresh_token', 'client_id', 'client_secret', 'subdomain')
-    if not all(config.get(k) for k in required):
-        return False
+        required = ('refresh_token', 'client_id', 'client_secret', 'subdomain')
+        if not all(config.get(k) for k in required):
+            return False
 
-    # Set the cool-down before the network call so a hung request can't
-    # re-enter and dogpile.
-    _next_refresh_allowed_at = now + MIN_REFRESH_INTERVAL_SEC
+        _next_refresh_allowed_at = now + MIN_REFRESH_INTERVAL_SEC
+
     token_url = 'https://{}.zendesk.com/oauth/tokens'.format(config['subdomain'])
 
     LOGGER.info("Access token expired, attempting refresh via %s", token_url)

@@ -35,8 +35,9 @@ def sync_stream(state, start_date, instance):
                               instance.replication_key,
                               start_date)
 
-    checkpoint_every = int(
-        (instance.config or {}).get('checkpoint_every', DEFAULT_CHECKPOINT_EVERY)
+    checkpoint_every = max(
+        1,
+        int((instance.config or {}).get('checkpoint_every', DEFAULT_CHECKPOINT_EVERY) or DEFAULT_CHECKPOINT_EVERY),
     )
     checkpoints_seen = 0
 
@@ -45,7 +46,13 @@ def sync_stream(state, start_date, instance):
         for (stream, record) in instance.sync(state):
             if stream is CHECKPOINT_SENTINEL:
                 checkpoints_seen += 1
-                if checkpoints_seen % checkpoint_every == 0:
+                # Only INCREMENTAL streams have a meaningful bookmark to
+                # persist mid-stream. FULL_TABLE replays from scratch on
+                # the next run, so a partial-progress write is wasted.
+                if (
+                    instance.replication_method == "INCREMENTAL"
+                    and checkpoints_seen % checkpoint_every == 0
+                ):
                     singer.write_state(state)
                 continue
 

@@ -105,34 +105,19 @@ class TestCheckpointSentinel(unittest.TestCase):
 
     @patch("tap_zendesk.sync.singer")
     def test_state_written_on_checkpoint_modulo(self, mock_singer):
-        records = [
-            ("tickets_obj", {"id": 1}),
-            (CHECKPOINT_SENTINEL, None),
-            ("tickets_obj", {"id": 2}),
-            (CHECKPOINT_SENTINEL, None),  # 2nd sentinel — should trigger write_state
-            ("tickets_obj", {"id": 3}),
-            (CHECKPOINT_SENTINEL, None),
-            (CHECKPOINT_SENTINEL, None),  # 4th sentinel — should trigger again
-        ]
-        # parent identity match — tap_stream_id strings line up
-        for tup in records:
-            stream_obj, _ = tup
-            if stream_obj is not CHECKPOINT_SENTINEL:
-                # Replace string with a mock stream having the right id
-                pass
-
-        # Build a more realistic record list with proper stream objects
         parent = MagicMock()
         parent.tap_stream_id = "tickets"
         parent.schema.to_dict.return_value = {}
         parent.metadata = []
-        records_real = []
-        for stream_obj, payload in records:
-            if stream_obj is CHECKPOINT_SENTINEL:
-                records_real.append((CHECKPOINT_SENTINEL, payload))
-            else:
-                records_real.append((parent, payload))
-
+        records_real = [
+            (parent, {"id": 1}),
+            (CHECKPOINT_SENTINEL, None),
+            (parent, {"id": 2}),
+            (CHECKPOINT_SENTINEL, None),  # 2nd sentinel — should trigger
+            (parent, {"id": 3}),
+            (CHECKPOINT_SENTINEL, None),
+            (CHECKPOINT_SENTINEL, None),  # 4th sentinel — should trigger
+        ]
         instance = MagicMock()
         instance.replication_method = "INCREMENTAL"
         instance.replication_key = "updated_at"
@@ -172,6 +157,34 @@ class TestCheckpointSentinel(unittest.TestCase):
 
         # Only 2 records were emitted; the sentinel is not a record
         assert mock_singer.write_record.call_count == 2
+
+    @patch("tap_zendesk.sync.singer")
+    def test_full_table_does_not_write_state_on_sentinel(self, mock_singer):
+        """FULL_TABLE streams have no useful mid-stream bookmark, so the
+        sentinel-driven state writes should be skipped — only the
+        end-of-stream behavior applies (and that path is gated on
+        INCREMENTAL too, so write_state should not be called at all)."""
+        parent = MagicMock()
+        parent.tap_stream_id = "tickets"
+        parent.schema.to_dict.return_value = {}
+        parent.metadata = []
+        records = [
+            (parent, {"id": 1}),
+            (CHECKPOINT_SENTINEL, None),
+            (parent, {"id": 2}),
+            (CHECKPOINT_SENTINEL, None),
+        ]
+
+        instance = MagicMock()
+        instance.replication_method = "FULL_TABLE"
+        instance.replication_key = None
+        instance.config = {"checkpoint_every": 1}
+        instance.stream = parent
+        instance.sync = Mock(return_value=iter(records))
+
+        sync_stream({}, "2025-01-01", instance)
+
+        assert mock_singer.write_state.call_count == 0
 
 
 class TestTicketsConcurrentSubStreams(unittest.TestCase):
@@ -240,6 +253,85 @@ class TestTicketsConcurrentSubStreams(unittest.TestCase):
         # Each ticket should be followed by exactly one sentinel
         sentinel_count = sum(1 for s, _ in emitted if s is CHECKPOINT_SENTINEL)
         assert sentinel_count == 2
+
+    @patch("tap_zendesk.streams.TicketComments")
+    @patch("tap_zendesk.streams.TicketMetrics")
+    @patch("tap_zendesk.streams.TicketAudits")
+    def test_comments_selected_uses_split_fetch_then_process(
+        self, mock_audits_cls, mock_metrics_cls, mock_comments_cls
+    ):
+        """When comments are selected, workers call fetch_records (HTTP
+        only, threadsafe) and the main thread runs process_records (state
+        mutation). Verify both halves fire in the right order and that the
+        comment records reach the emitted stream."""
+        from tap_zendesk.streams import Tickets
+
+        tickets_data = [
+            {"id": 10, "generated_timestamp": 1700000000, "fields": []},
+            {"id": 20, "generated_timestamp": 1700000100, "fields": []},
+        ]
+
+        audits_inst = MagicMock()
+        audits_inst.is_selected.return_value = False
+        audits_inst.count = 0
+
+        metrics_inst = MagicMock()
+        metrics_inst.is_selected.return_value = False
+        metrics_inst.count = 0
+
+        comments_inst = MagicMock()
+        comments_inst.is_selected.return_value = True
+        comments_inst.count = 0
+        comments_inst.starting_state = None
+        comments_inst.starting_bookmark = None
+        comments_inst.name = "ticket_comments"
+        comments_inst.replication_key = "created_at"
+        comments_inst.stream = MagicMock(tap_stream_id="ticket_comments")
+        # fetch_records: threadsafe, returns list per ticket
+        comments_inst.fetch_records.side_effect = lambda tid: [
+            {"ticket_id": tid, "id": tid * 100 + i} for i in range(2)
+        ]
+        # process_records: mutates state main-thread, yields tuples
+        def fake_process(ticket_id, records, state):
+            for r in records:
+                yield (comments_inst.stream, r)
+        comments_inst.process_records.side_effect = fake_process
+
+        mock_audits_cls.return_value = audits_inst
+        mock_metrics_cls.return_value = metrics_inst
+        mock_comments_cls.return_value = comments_inst
+
+        tickets = Tickets(client=None, config={"subdomain": "x", "substream_workers": 2})
+        tickets.stream = MagicMock(tap_stream_id="tickets")
+        tickets.get_objects = Mock(return_value=iter(tickets_data))
+        tickets.get_bookmark = Mock(return_value=Mock())
+        tickets.update_bookmark = Mock()
+
+        with patch("tap_zendesk.streams.singer") as mock_streams_singer:
+            mock_streams_singer.bookmarks.ensure_bookmark_path.return_value = {}
+            mock_streams_singer.get_bookmark.return_value = {}
+            emitted = list(tickets.sync(state={"bookmarks": {}}))
+
+        # fetch_records called once per ticket (on workers); process_records
+        # called once per ticket (on main thread). Same count, deterministic
+        # ticket-id ordering for process_records (main-thread pull order).
+        assert comments_inst.fetch_records.call_count == 2
+        assert comments_inst.process_records.call_count == 2
+        process_call_order = [c.args[0] for c in comments_inst.process_records.call_args_list]
+        assert process_call_order == [10, 20]
+
+        # Yielded comment records appear in ticket order, after each parent.
+        non_sentinel = [
+            (s.tap_stream_id if hasattr(s, "tap_stream_id") else s, p)
+            for s, p in emitted
+            if s is not CHECKPOINT_SENTINEL
+        ]
+        assert non_sentinel[0] == ("tickets", tickets_data[0])
+        assert non_sentinel[1][0] == "ticket_comments"
+        assert non_sentinel[1][1]["ticket_id"] == 10
+        assert non_sentinel[3] == ("tickets", tickets_data[1])
+        assert non_sentinel[4][0] == "ticket_comments"
+        assert non_sentinel[4][1]["ticket_id"] == 20
 
 
 if __name__ == "__main__":

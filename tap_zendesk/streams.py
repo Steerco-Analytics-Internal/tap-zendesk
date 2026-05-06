@@ -372,11 +372,29 @@ class Tickets(CursorBasedExportStream):
             emit_sub_stream_metrics(comments_stream)
             return
 
+        # Prime TicketComments.starting_state before any worker fetches
+        # run. The original code captured starting_state lazily on the
+        # first comment; under concurrency that capture would be sensitive
+        # to the order workers complete in. Doing it once up-front locks
+        # in the comment fallback bookmark deterministically.
+        if comments_stream.is_selected() and not comments_stream.starting_state:
+            primed_state = singer.bookmarks.ensure_bookmark_path(
+                state,
+                ['bookmarks', comments_stream.name, comments_stream.replication_key],
+            )
+            comments_stream.starting_state = copy.deepcopy(primed_state)
+            comments_stream.starting_bookmark = singer.get_bookmark(
+                comments_stream.starting_state,
+                comments_stream.name,
+                comments_stream.replication_key,
+            ) or {}
+
         # Pipelined pre-fetch: keep `worker_count` sub-stream fetches in
         # flight at any time. The main loop emits records strictly in ticket
         # order, but the network work for upcoming tickets happens in
         # parallel with the current ticket's emission.
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        executor = ThreadPoolExecutor(max_workers=worker_count)
+        try:
             in_flight = deque()
             tickets_iter = iter(tickets)
 
@@ -398,6 +416,11 @@ class Tickets(CursorBasedExportStream):
                 audits, metrics, comments = future.result()
                 yield from emit_ticket(ticket, audits, metrics, comments)
                 submit_next()
+        finally:
+            # cancel_futures avoids burning rate-limit quota on
+            # already-queued sub-stream fetches when an exception unwinds
+            # the generator (e.g. an unhandled error from future.result()).
+            executor.shutdown(wait=True, cancel_futures=True)
 
         emit_sub_stream_metrics(audits_stream)
         emit_sub_stream_metrics(metrics_stream)
@@ -457,13 +480,16 @@ class TicketMetrics(CursorBasedStream):
 
     def get_objects(self, ticket_id):
         """Yield unwrapped ticket_metric records. Threadsafe — no state
-        mutation, no metric counters. Used by Tickets.sync's worker pool."""
+        mutation, no metric counters. Used by Tickets.sync's worker pool.
+
+        Raises KeyError if a page lacks the expected ``ticket_metric`` key,
+        matching the original behavior where missing data was loud rather
+        than silently skipped.
+        """
         url = self.endpoint.format(self.config['subdomain'], ticket_id)
         pages = http.get_offset_based(url, self.config['access_token'], self.request_timeout)
         for page in pages:
-            item = page.get(self.item_key)
-            if item is not None:
-                yield item
+            yield page[self.item_key]
 
     def sync(self, ticket_id):
         for metric in self.get_objects(ticket_id):
