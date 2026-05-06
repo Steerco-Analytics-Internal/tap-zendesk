@@ -9,6 +9,15 @@ from singer import Transformer
 
 LOGGER = singer.get_logger()
 
+# Sentinel that streams yield to indicate "all records up to this point have
+# been emitted; the in-memory state's bookmark is safe to durably commit."
+# sync_stream recognizes the sentinel and emits singer.write_state on a
+# parent-count modulo so multi-day syncs make incremental progress instead
+# of restarting from the previous successful bookmark on every failure.
+CHECKPOINT_SENTINEL = object()
+
+DEFAULT_CHECKPOINT_EVERY = 100
+
 def process_record(record):
     """ Serializes Zenpy's internal classes into Python objects via ZendeskEncoder. """
     rec_str = json.dumps(record, cls=ZendeskEncoder)
@@ -26,24 +35,30 @@ def sync_stream(state, start_date, instance):
                               instance.replication_key,
                               start_date)
 
+    checkpoint_every = int(
+        (instance.config or {}).get('checkpoint_every', DEFAULT_CHECKPOINT_EVERY)
+    )
+    checkpoints_seen = 0
+
     parent_stream = stream
     with metrics.record_counter(stream.tap_stream_id) as counter, Transformer() as transformer:
         for (stream, record) in instance.sync(state):
-            # NB: Only count parent records in the case of sub-streams
+            if stream is CHECKPOINT_SENTINEL:
+                checkpoints_seen += 1
+                if checkpoints_seen % checkpoint_every == 0:
+                    singer.write_state(state)
+                continue
+
             if stream.tap_stream_id == parent_stream.tap_stream_id:
                 counter.increment()
 
             rec = process_record(record)
-            # SCHEMA_GEN: Comment out transform
             rec = transformer.transform(rec, stream.schema.to_dict(), metadata.to_map(stream.metadata))
 
             singer.write_record(stream.tap_stream_id, rec)
-            # NB: We will only write state at the end of a stream's sync:
-            #  We may find out that there exists a sync that takes too long and can never emit a bookmark
-            #  but we don't know if we can guarentee the order of emitted records.
 
-        # if instance.replication_method == "INCREMENTAL":
-        #     singer.write_state(state)
+        if instance.replication_method == "INCREMENTAL":
+            singer.write_state(state)
 
         return counter.value
 
