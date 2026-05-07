@@ -153,7 +153,9 @@ class CursorBasedExportStream(Stream):
 
     def check_access(self):
         url = self.endpoint.format(self.config['subdomain'])
-        start_time = int(datetime.datetime.strptime(self.config['start_date'], START_DATE_FORMAT).timestamp())
+        # utils.strptime_with_tz tolerates both "...Z" and "....000Z" — strict
+        # strptime crashed discover when callers passed millisecond precision.
+        start_time = int(utils.strptime_with_tz(self.config['start_date']).timestamp())
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         http.call_api(url, self.request_timeout, params={'start_time': start_time, 'per_page': 1}, headers=HEADERS)
 
@@ -424,7 +426,7 @@ class Tickets(CursorBasedExportStream):
         Check whether the permission was given to access stream resources or not.
         '''
         url = self.endpoint.format(self.config['subdomain'])
-        start_time = int(datetime.datetime.strptime(self.config['start_date'], START_DATE_FORMAT).timestamp())
+        start_time = int(utils.strptime_with_tz(self.config['start_date']).timestamp())
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
 
         http.call_api(url, self.request_timeout, params={'start_time': start_time, 'per_page': 1}, headers=HEADERS)
