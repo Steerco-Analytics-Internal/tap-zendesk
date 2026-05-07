@@ -207,7 +207,7 @@ def raise_for_error(response):
         response_json = response.json()
     except Exception: # pylint: disable=broad-except
         response_json = {}
-    if response.status_code not in [200, 404]:
+    if response.status_code != 200:
         if response_json.get('error'):
             message = "HTTP-code: {}, Message: {}".format(response.status_code, response_json.get('error'))
         else:
