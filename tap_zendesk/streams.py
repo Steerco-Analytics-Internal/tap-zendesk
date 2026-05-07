@@ -17,7 +17,7 @@ from tap_zendesk.sync import CHECKPOINT_SENTINEL
 from dateutil.parser import isoparse
 
 
-DEFAULT_SUBSTREAM_WORKERS = 6
+DEFAULT_SUBSTREAM_WORKERS = 12
 
 
 LOGGER = singer.get_logger()
