@@ -199,10 +199,13 @@ class TestTicketsConcurrentSubStreams(unittest.TestCase):
     ):
         from tap_zendesk.streams import Tickets
 
-        # Two tickets, each with deterministic sub-stream payloads
+        # Two tickets, each with deterministic sub-stream payloads.
+        # metric_set is sideloaded onto each ticket (consumed by Tickets.sync,
+        # popped before emit) — so we attach a payload here that should
+        # surface as the ticket_metrics record for that ticket.
         tickets_data = [
-            {"id": 1, "generated_timestamp": 1700000000, "fields": []},
-            {"id": 2, "generated_timestamp": 1700000100, "fields": []},
+            {"id": 1, "generated_timestamp": 1700000000, "fields": [], "metric_set": {"m": 1}},
+            {"id": 2, "generated_timestamp": 1700000100, "fields": [], "metric_set": {"m": 2}},
         ]
 
         # Sub-stream stubs: selected, return distinct records per ticket
@@ -217,7 +220,6 @@ class TestTicketsConcurrentSubStreams(unittest.TestCase):
         metrics_inst.count = 0
         metrics_inst.stream = MagicMock(tap_stream_id="ticket_metrics")
         metrics_inst.item_key = "ticket_metric"
-        metrics_inst.get_objects.side_effect = lambda tid: iter([{"m": tid}])
 
         comments_inst = MagicMock()
         comments_inst.is_selected.return_value = False  # keep this test focused
@@ -242,13 +244,17 @@ class TestTicketsConcurrentSubStreams(unittest.TestCase):
             for s, payload in emitted
             if s is not CHECKPOINT_SENTINEL
         ]
-        # Per-ticket order: parent → audit → metric (comments unselected)
-        assert non_sentinels[0] == ("tickets", tickets_data[0])
-        assert non_sentinels[1] == ("ticket_audits", {"a": 1})
-        assert non_sentinels[2] == ("ticket_metrics", {"m": 1})
-        assert non_sentinels[3] == ("tickets", tickets_data[1])
-        assert non_sentinels[4] == ("ticket_audits", {"a": 2})
-        assert non_sentinels[5] == ("ticket_metrics", {"m": 2})
+        # Per-ticket order: parent → metric (sideloaded) → audit (comments unselected).
+        # The ticket payload retains its keys but `fields` and `metric_set` are popped.
+        assert non_sentinels[0] == ("tickets", {"id": 1, "generated_timestamp": 1700000000})
+        assert non_sentinels[1] == ("ticket_metrics", {"m": 1})
+        assert non_sentinels[2] == ("ticket_audits", {"a": 1})
+        assert non_sentinels[3] == ("tickets", {"id": 2, "generated_timestamp": 1700000100})
+        assert non_sentinels[4] == ("ticket_metrics", {"m": 2})
+        assert non_sentinels[5] == ("ticket_audits", {"a": 2})
+
+        # The metrics endpoint must NOT be hit per-ticket — sideload replaces it
+        metrics_inst.get_objects.assert_not_called()
 
         # Each ticket should be followed by exactly one sentinel
         sentinel_count = sum(1 for s, _ in emitted if s is CHECKPOINT_SENTINEL)

@@ -162,7 +162,7 @@ class TestBackoff(unittest.TestCase):
 
         except http.ZendeskBadRequestError as e:
             expected_error_message = (
-                "HTTP-error-code: 400, Error: A validation exception has occurred."
+                "HTTP-code: 400, Message: A validation exception has occurred."
             )
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
@@ -187,7 +187,7 @@ class TestBackoff(unittest.TestCase):
 
         except http.ZendeskBadRequestError as e:
             expected_error_message = (
-                "HTTP-error-code: 400, Error: Couldn't authenticate you"
+                "HTTP-code: 400, Message: Couldn't authenticate you"
             )
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
@@ -208,7 +208,7 @@ class TestBackoff(unittest.TestCase):
             ]
         except http.ZendeskUnauthorizedError as e:
             expected_error_message = (
-                "HTTP-error-code: 401, Error: The access token provided is expired, revoked,"
+                "HTTP-code: 401, Message: The access token provided is expired, revoked,"
                 " malformed or invalid for other reasons."
             )
             # Verify the message formed for the custom exception
@@ -229,7 +229,7 @@ class TestBackoff(unittest.TestCase):
                 )
             ]
         except http.ZendeskNotFoundError as e:
-            expected_error_message = "HTTP-error-code: 404, Error: The resource you have specified cannot be found."
+            expected_error_message = "HTTP-code: 404, Message: The resource you have specified cannot be found."
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
 
@@ -249,7 +249,7 @@ class TestBackoff(unittest.TestCase):
                     url="some_url", access_token="some_token", request_timeout=300
                 )
             ]
-            expected_error_message = "HTTP-error-code: 409, Error: The API request cannot be completed because the requested operation would conflict with an existing item."
+            expected_error_message = "HTTP-code: 409, Message: The API request cannot be completed because the requested operation would conflict with an existing item."
             self.assertEqual(str(e), expected_error_message)
 
         # Verify that requests.Session.request called 10 times
@@ -267,7 +267,7 @@ class TestBackoff(unittest.TestCase):
                 )
             ]
         except http.ZendeskUnprocessableEntityError as e:
-            expected_error_message = "HTTP-error-code: 422, Error: The request content itself is not processable by the server."
+            expected_error_message = "HTTP-code: 422, Message: The request content itself is not processable by the server."
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
 
@@ -291,7 +291,7 @@ class TestBackoff(unittest.TestCase):
             ]
         except http.ZendeskInternalServerError as e:
             expected_error_message = (
-                "HTTP-error-code: 500, Error: The server encountered an unexpected condition which prevented"
+                "HTTP-code: 500, Message: The server encountered an unexpected condition which prevented"
                 " it from fulfilling the request."
             )
             # Verify the message formed for the custom exception
@@ -316,7 +316,7 @@ class TestBackoff(unittest.TestCase):
                 )
             ]
         except http.ZendeskNotImplementedError as e:
-            expected_error_message = "HTTP-error-code: 501, Error: The server does not support the functionality required to fulfill the request."
+            expected_error_message = "HTTP-code: 501, Message: The server does not support the functionality required to fulfill the request."
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
 
@@ -340,7 +340,7 @@ class TestBackoff(unittest.TestCase):
             ]
         except http.ZendeskBadGatewayError as e:
             expected_error_message = (
-                "HTTP-error-code: 502, Error: Server received an invalid response."
+                "HTTP-code: 502, Message: Server received an invalid response."
             )
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
@@ -362,7 +362,7 @@ class TestBackoff(unittest.TestCase):
                 )
             ]
         except http.ZendeskError as e:
-            expected_error_message = "HTTP-error-code: 444, Error: Unknown Error"
+            expected_error_message = "HTTP-code: 444, Message: Unknown Error"
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
 
@@ -425,7 +425,7 @@ class TestBackoff(unittest.TestCase):
                 )
             ]
         except http.ZendeskError as e:
-            expected_error_message = "HTTP-error-code: 524, Error: Unknown Error"
+            expected_error_message = "HTTP-code: 524, Message: Unknown Error"
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
 
@@ -448,7 +448,7 @@ class TestBackoff(unittest.TestCase):
                 )
             ]
         except http.ZendeskError as e:
-            expected_error_message = "HTTP-error-code: 520, Error: Unknown Error"
+            expected_error_message = "HTTP-code: 520, Message: Unknown Error"
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
 
@@ -472,7 +472,7 @@ class TestBackoff(unittest.TestCase):
             ]
         except http.ZendeskServiceUnavailableError as e:
             expected_error_message = (
-                "HTTP-error-code: 503, Error: API service is currently unavailable."
+                "HTTP-code: 503, Message: API service is currently unavailable."
             )
             # Verify the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)

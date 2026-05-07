@@ -91,16 +91,16 @@ class ZendeskError(Exception):
 class ZendeskBackoff(ZendeskError):
     pass
 
-class ZendeskBadRequest(ZendeskError):
+class ZendeskBadRequestError(ZendeskError):
     pass
 
-class ZendeskUnauthorized(ZendeskError):
+class ZendeskUnauthorizedError(ZendeskError):
     pass
 
-class ZendeskForbidden(ZendeskError):
+class ZendeskForbiddenError(ZendeskError):
     pass
 
-class ZendeskNotFound(ZendeskError):
+class ZendeskNotFoundError(ZendeskError):
     pass
 
 class ZendeskConflictError(ZendeskError):
@@ -126,19 +126,19 @@ class ZendeskServiceUnavailableError(ZendeskBackoff):
 
 ERROR_CODE_EXCEPTION_MAPPING = {
     400: {
-        "raise_exception": ZendeskBadRequest,
+        "raise_exception": ZendeskBadRequestError,
         "message": "A validation exception has occurred."
     },
     401: {
-        "raise_exception": ZendeskUnauthorized,
+        "raise_exception": ZendeskUnauthorizedError,
         "message": "The access token provided is expired, revoked, malformed or invalid for other reasons."
     },
     403: {
-        "raise_exception": ZendeskForbidden,
+        "raise_exception": ZendeskForbiddenError,
         "message": "You are missing the following required scopes: read"
     },
     404: {
-        "raise_exception": ZendeskNotFound,
+        "raise_exception": ZendeskNotFoundError,
         "message": "The resource you have specified cannot be found."
     },
     409: {
@@ -207,7 +207,7 @@ def raise_for_error(response):
         response_json = response.json()
     except Exception: # pylint: disable=broad-except
         response_json = {}
-    if response.status_code not in [200, 404]:
+    if response.status_code != 200:
         if response_json.get('error'):
             message = "HTTP-code: {}, Message: {}".format(response.status_code, response_json.get('error'))
         else:
@@ -313,18 +313,20 @@ def get_offset_based(url, access_token, request_timeout, **kwargs):
         yield response_json
         next_url = response_json.get('next_page')
 
-def get_incremental_export(url, access_token, request_timeout, start_time):
+def get_incremental_export(url, access_token, request_timeout, start_time, params=None):
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Authorization': 'Bearer {}'.format(access_token),
     }
 
-    params = {'start_time': start_time}
-    if not isinstance(start_time, int):
-        params = {'start_time': int(start_time.timestamp())}
+    base_params = dict(params or {})
+    if isinstance(start_time, int):
+        base_params['start_time'] = start_time
+    else:
+        base_params['start_time'] = int(start_time.timestamp())
 
-    response = call_api(url, request_timeout, params=params, headers=headers)
+    response = call_api(url, request_timeout, params=base_params, headers=headers)
     response_json = response.json()
 
     yield response_json
@@ -334,13 +336,9 @@ def get_incremental_export(url, access_token, request_timeout, start_time):
     while not end_of_stream:
         cursor = response_json['after_cursor']
 
-        params = {'cursor': cursor}
-        # Replaced below line of code with call_api method
-        # response = requests.get(url, params=params, headers=headers)
-        # response.raise_for_status()
-        # Because it doing the same as call_api. So, now error handling will work properly with backoff
-        # as earlier backoff was not possible
-        response = call_api(url, request_timeout, params=params, headers=headers)
+        cursor_params = dict(params or {})
+        cursor_params['cursor'] = cursor
+        response = call_api(url, request_timeout, params=cursor_params, headers=headers)
 
         response_json = response.json()
 

@@ -94,10 +94,10 @@ class DeletedTickets(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config['access_token'])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskForbidden:
+        except http.ZendeskForbiddenError:
             LOGGER.warning("No access to deleted_tickets — user may lack view_deleted_tickets permission")
             raise
-        except http.ZendeskNotFound:
+        except http.ZendeskNotFoundError:
             pass
 
 
@@ -282,7 +282,7 @@ class UserIdentities(Stream):
         }
         try:
             http.call_api(url, self.request_timeout, params={'start_time': start_time, 'per_page': 1, 'include': 'identities'}, headers=headers)
-        except http.ZendeskForbidden:
+        except http.ZendeskForbiddenError:
             raise
-        except http.ZendeskNotFound:
+        except http.ZendeskNotFoundError:
             pass

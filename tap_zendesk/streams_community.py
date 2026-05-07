@@ -56,14 +56,14 @@ class Posts(Stream):
                 try:
                     for comment in comments_stream.sync(post_id, state):
                         yield comment
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve comments for post (ID: %s), not found", post_id)
 
             if votes_stream.is_selected():
                 try:
                     for vote in votes_stream.sync(post_id):
                         yield vote
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve votes for post (ID: %s), not found", post_id)
 
     def check_access(self):
@@ -75,9 +75,9 @@ class Posts(Stream):
         }
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=headers)
-        except http.ZendeskForbidden:
+        except http.ZendeskForbiddenError:
             raise
-        except http.ZendeskNotFound:
+        except http.ZendeskNotFoundError:
             pass
 
 
@@ -108,7 +108,7 @@ class PostComments(Stream):
                 try:
                     for vote in comment_votes_stream.sync(post_id, comment['id']):
                         yield vote
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve votes for post comment (post: %s, comment: %s), not found",
                                    post_id, comment['id'])
 

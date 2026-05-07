@@ -41,21 +41,21 @@ class Articles(Stream):
                 try:
                     for attachment in attachments_stream.sync(article_id):
                         yield attachment
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve attachments for article (ID: %s), not found", article_id)
 
             if comments_stream.is_selected():
                 try:
                     for comment in comments_stream.sync(article_id, state):
                         yield comment
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve comments for article (ID: %s), not found", article_id)
 
             if votes_stream.is_selected():
                 try:
                     for vote in votes_stream.sync(article_id):
                         yield vote
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve votes for article (ID: %s), not found", article_id)
 
     def check_access(self):
@@ -67,9 +67,9 @@ class Articles(Stream):
         }
         try:
             http.call_api(url, self.request_timeout, params={'start_time': 0}, headers=headers)
-        except http.ZendeskForbidden:
+        except http.ZendeskForbiddenError:
             raise
-        except http.ZendeskNotFound:
+        except http.ZendeskNotFoundError:
             pass
 
 
@@ -124,7 +124,7 @@ class ArticleComments(Stream):
                 try:
                     for vote in comment_votes_stream.sync(article_id, comment['id']):
                         yield vote
-                except http.ZendeskNotFound:
+                except http.ZendeskNotFoundError:
                     LOGGER.warning("Unable to retrieve votes for article comment (article: %s, comment: %s), not found",
                                    article_id, comment['id'])
 

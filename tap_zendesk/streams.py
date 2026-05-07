@@ -17,7 +17,7 @@ from tap_zendesk.sync import CHECKPOINT_SENTINEL
 from dateutil.parser import isoparse
 
 
-DEFAULT_SUBSTREAM_WORKERS = 6
+DEFAULT_SUBSTREAM_WORKERS = 12
 
 
 LOGGER = singer.get_logger()
@@ -157,13 +157,15 @@ class CursorBasedExportStream(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         http.call_api(url, self.request_timeout, params={'start_time': start_time, 'per_page': 1}, headers=HEADERS)
 
-    def get_objects(self, start_time):
+    def get_objects(self, start_time, params=None):
         '''
-        Retrieve objects from the incremental exports endpoint using cursor based pagination
+        Retrieve objects from the incremental exports endpoint using cursor based pagination.
+        Optional `params` are forwarded to the HTTP layer (e.g. include= sideloads).
         '''
         url = self.endpoint.format(self.config['subdomain'])
-        # Pass `request_timeout` parameter
-        for page in http.get_incremental_export(url, self.config['access_token'], self.request_timeout, start_time):
+        for page in http.get_incremental_export(
+            url, self.config['access_token'], self.request_timeout, start_time, params=params,
+        ):
             if "error" in page and self.item_key not in page:
                 raise Exception("Error: "+page.get("error",{}).get("message","Error found in the account."))
             yield from page[self.item_key]
@@ -278,6 +280,12 @@ class Tickets(CursorBasedExportStream):
     item_key = "tickets"
     endpoint = "https://{}.zendesk.com/api/v2/incremental/tickets/cursor.json"
 
+    def get_objects(self, start_time, params=None):
+        merged = {'include': 'metric_sets'}
+        if params:
+            merged.update(params)
+        return super().get_objects(start_time, params=merged)
+
     def sync(self, state): #pylint: disable=too-many-statements
 
         bookmark = self.get_bookmark(state)
@@ -301,14 +309,13 @@ class Tickets(CursorBasedExportStream):
         worker_count = max(1, int(self.config.get('substream_workers') or DEFAULT_SUBSTREAM_WORKERS))
         any_sub_selected = (
             audits_stream.is_selected()
-            or metrics_stream.is_selected()
             or comments_stream.is_selected()
         )
 
         def _fetch_or_404(stream_obj, fetch_fn, ticket_id):
             try:
                 return fetch_fn()
-            except http.ZendeskNotFound:
+            except http.ZendeskNotFoundError:
                 LOGGER.warning(
                     "Unable to retrieve %s for ticket (ID: %s), record not found",
                     stream_obj.name, ticket_id,
@@ -316,20 +323,13 @@ class Tickets(CursorBasedExportStream):
                 return []
 
         def fetch_substreams(ticket_id):
-            """Pure-HTTP sub-stream fetch. Runs on worker threads; must not
-            touch state. Returns (audits, metrics, comments) — each is
-            None when the stream is unselected, [] on 404, or a list."""
-            audits = metrics = comments = None
+            """Pure-HTTP sub-stream fetch. Audits + comments only; metrics
+            now come from the metric_sets sideload on the parent ticket."""
+            audits = comments = None
             if audits_stream.is_selected():
                 audits = _fetch_or_404(
                     audits_stream,
                     lambda: list(audits_stream.get_objects(ticket_id)),
-                    ticket_id,
-                )
-            if metrics_stream.is_selected():
-                metrics = _fetch_or_404(
-                    metrics_stream,
-                    lambda: list(metrics_stream.get_objects(ticket_id)),
                     ticket_id,
                 )
             if comments_stream.is_selected():
@@ -338,24 +338,26 @@ class Tickets(CursorBasedExportStream):
                     lambda: comments_stream.fetch_records(ticket_id),
                     ticket_id,
                 )
-            return audits, metrics, comments
+            return audits, comments
 
-        def emit_ticket(ticket, audits, metrics, comments):
+        def emit_ticket(ticket, audits, comments):
             zendesk_metrics.capture('ticket')
             generated_timestamp_dt = datetime.datetime.utcfromtimestamp(
                 ticket.get('generated_timestamp')
             ).replace(tzinfo=pytz.UTC)
-            ticket.pop('fields')
+            ticket.pop('fields', None)
+            metric_set = ticket.pop('metric_set', None)
             yield (self.stream, ticket)
+
+            if metrics_stream.is_selected() and metric_set is not None:
+                zendesk_metrics.capture('ticket_metric')
+                metrics_stream.count += 1
+                yield (metrics_stream.stream, metric_set)
 
             for audit in audits or []:
                 zendesk_metrics.capture('ticket_audit')
                 audits_stream.count += 1
                 yield (audits_stream.stream, audit)
-            for metric in metrics or []:
-                zendesk_metrics.capture('ticket_metric')
-                metrics_stream.count += 1
-                yield (metrics_stream.stream, metric)
             if comments is not None:
                 # process_records mutates state and must run main-thread only
                 yield from comments_stream.process_records(ticket['id'], comments, state)
@@ -367,9 +369,8 @@ class Tickets(CursorBasedExportStream):
 
         if not any_sub_selected:
             for ticket in tickets:
-                yield from emit_ticket(ticket, None, None, None)
+                yield from emit_ticket(ticket, None, None)
             emit_sub_stream_metrics(audits_stream)
-            emit_sub_stream_metrics(metrics_stream)
             emit_sub_stream_metrics(comments_stream)
             return
 
@@ -407,8 +408,8 @@ class Tickets(CursorBasedExportStream):
 
             while in_flight:
                 ticket, future = in_flight.popleft()
-                audits, metrics, comments = future.result()
-                yield from emit_ticket(ticket, audits, metrics, comments)
+                audits, comments = future.result()
+                yield from emit_ticket(ticket, audits, comments)
                 submit_next()
         finally:
             # On exception, drop already-queued fetches instead of burning
@@ -416,7 +417,6 @@ class Tickets(CursorBasedExportStream):
             executor.shutdown(wait=True, cancel_futures=True)
 
         emit_sub_stream_metrics(audits_stream)
-        emit_sub_stream_metrics(metrics_stream)
         emit_sub_stream_metrics(comments_stream)
 
     def check_access(self):
@@ -460,8 +460,8 @@ class TicketAudits(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskNotFound:
-            #Skip 404 ZendeskNotFound error as goal is just to check whether TicketComments have read permission or not
+        except http.ZendeskNotFoundError:
+            #Skip 404 ZendeskNotFoundError error as goal is just to check whether TicketComments have read permission or not
             pass
 
 class TicketMetrics(CursorBasedStream):
@@ -491,8 +491,8 @@ class TicketMetrics(CursorBasedStream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskNotFound:
-            #Skip 404 ZendeskNotFound error as goal is just to check whether TicketComments have read permission or not
+        except http.ZendeskNotFoundError:
+            #Skip 404 ZendeskNotFoundError error as goal is just to check whether TicketComments have read permission or not
             pass
 
 class TicketComments(Stream):
@@ -567,8 +567,8 @@ class TicketComments(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskNotFound:
-            #Skip 404 ZendeskNotFound error as goal is to just check to whether TicketComments have read permission or not
+        except http.ZendeskNotFoundError:
+            #Skip 404 ZendeskNotFoundError error as goal is to just check to whether TicketComments have read permission or not
             pass
 
 class SatisfactionRatings(CursorBasedStream):
