@@ -157,13 +157,15 @@ class CursorBasedExportStream(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         http.call_api(url, self.request_timeout, params={'start_time': start_time, 'per_page': 1}, headers=HEADERS)
 
-    def get_objects(self, start_time):
+    def get_objects(self, start_time, params=None):
         '''
-        Retrieve objects from the incremental exports endpoint using cursor based pagination
+        Retrieve objects from the incremental exports endpoint using cursor based pagination.
+        Optional `params` are forwarded to the HTTP layer (e.g. include= sideloads).
         '''
         url = self.endpoint.format(self.config['subdomain'])
-        # Pass `request_timeout` parameter
-        for page in http.get_incremental_export(url, self.config['access_token'], self.request_timeout, start_time):
+        for page in http.get_incremental_export(
+            url, self.config['access_token'], self.request_timeout, start_time, params=params,
+        ):
             if "error" in page and self.item_key not in page:
                 raise Exception("Error: "+page.get("error",{}).get("message","Error found in the account."))
             yield from page[self.item_key]

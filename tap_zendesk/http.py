@@ -313,18 +313,20 @@ def get_offset_based(url, access_token, request_timeout, **kwargs):
         yield response_json
         next_url = response_json.get('next_page')
 
-def get_incremental_export(url, access_token, request_timeout, start_time):
+def get_incremental_export(url, access_token, request_timeout, start_time, params=None):
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Authorization': 'Bearer {}'.format(access_token),
     }
 
-    params = {'start_time': start_time}
-    if not isinstance(start_time, int):
-        params = {'start_time': int(start_time.timestamp())}
+    base_params = dict(params or {})
+    if isinstance(start_time, int):
+        base_params['start_time'] = start_time
+    else:
+        base_params['start_time'] = int(start_time.timestamp())
 
-    response = call_api(url, request_timeout, params=params, headers=headers)
+    response = call_api(url, request_timeout, params=base_params, headers=headers)
     response_json = response.json()
 
     yield response_json
@@ -334,13 +336,9 @@ def get_incremental_export(url, access_token, request_timeout, start_time):
     while not end_of_stream:
         cursor = response_json['after_cursor']
 
-        params = {'cursor': cursor}
-        # Replaced below line of code with call_api method
-        # response = requests.get(url, params=params, headers=headers)
-        # response.raise_for_status()
-        # Because it doing the same as call_api. So, now error handling will work properly with backoff
-        # as earlier backoff was not possible
-        response = call_api(url, request_timeout, params=params, headers=headers)
+        cursor_params = dict(params or {})
+        cursor_params['cursor'] = cursor
+        response = call_api(url, request_timeout, params=cursor_params, headers=headers)
 
         response_json = response.json()
 
