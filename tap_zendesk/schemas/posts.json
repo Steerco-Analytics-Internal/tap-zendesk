@@ -7,7 +7,7 @@
     "comment_count": { "type": ["null", "integer"] },
     "content_tag_ids": {
       "type": ["null", "array"],
-      "items": { "type": ["null", "integer"] }
+      "items": { "type": ["null", "string"] }
     },
     "details": { "type": ["null", "string"] },
     "featured": { "type": ["null", "boolean"] },
