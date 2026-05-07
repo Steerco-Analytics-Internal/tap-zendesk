@@ -12,7 +12,7 @@
     "html_url": { "type": ["null", "string"] },
     "source_locale": { "type": ["null", "string"] },
     "theme_template": { "type": ["null", "string"] },
-    "outdated": { "type": ["null", "string"] },
+    "outdated": { "type": ["null", "boolean"] },
     "created_at": { "type": ["null", "string"], "format": "date-time" },
     "updated_at": { "type": ["null", "string"], "format": "date-time" }
   }

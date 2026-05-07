@@ -7,7 +7,7 @@
     "comments_disabled": { "type": ["null", "boolean"] },
     "content_tag_ids": {
       "type": ["null", "array"],
-      "items": { "type": ["null", "integer"] }
+      "items": { "type": ["null", "string"] }
     },
     "created_at": { "type": ["null", "string"], "format": "date-time" },
     "draft": { "type": ["null", "boolean"] },
@@ -33,6 +33,10 @@
     "updated_at": { "type": ["null", "string"], "format": "date-time" },
     "url": { "type": ["null", "string"] },
     "user_segment_id": { "type": ["null", "integer"] },
+    "user_segment_ids": {
+      "type": ["null", "array"],
+      "items": { "type": ["null", "integer"] }
+    },
     "vote_count": { "type": ["null", "integer"] },
     "vote_sum": { "type": ["null", "integer"] }
   }

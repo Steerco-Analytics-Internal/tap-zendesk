@@ -12,6 +12,7 @@
     "content_type": { "type": ["null", "string"] },
     "size": { "type": ["null", "integer"] },
     "inline": { "type": ["null", "boolean"] },
+    "guide_media_id": { "type": ["null", "string"] },
     "created_at": { "type": ["null", "string"], "format": "date-time" },
     "updated_at": { "type": ["null", "string"], "format": "date-time" }
   }
