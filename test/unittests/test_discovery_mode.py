@@ -186,7 +186,7 @@ class TestDiscovery(unittest.TestCase):
         try:
             responses = discover.discover_streams('dummy_client', {'subdomain': 'arp', 'access_token': 'dummy_token', 'start_date':START_DATE})
         except http.ZendeskBadRequestError as e:
-            expected_error_message = "HTTP-error-code: 400, Error: A validation exception has occurred."
+            expected_error_message = "HTTP-code: 400, Message: A validation exception has occurred."
             # Verifying the message formed for the custom exception
             self.assertEqual(str(e), expected_error_message)
             
@@ -302,7 +302,7 @@ class TestDiscovery(unittest.TestCase):
         try:
             responses = discover.discover_streams('dummy_client', {'subdomain': 'arp', 'access_token': 'dummy_token', 'start_date':START_DATE})
         except http.ZendeskForbiddenError as e:
-            expected_message = "HTTP-error-code: 403, Error: The account credentials supplied do not have 'read' access to any "\
+            expected_message = "HTTP-code: 403, Message: The account credentials supplied do not have 'read' access to any "\
             "of streams supported by the tap. Data collection cannot be initiated due to lack of permissions."
             # # Verifying the message formed for the custom exception
             self.assertEqual(str(e), expected_message)

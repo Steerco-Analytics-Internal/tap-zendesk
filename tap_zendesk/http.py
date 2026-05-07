@@ -91,16 +91,16 @@ class ZendeskError(Exception):
 class ZendeskBackoff(ZendeskError):
     pass
 
-class ZendeskBadRequest(ZendeskError):
+class ZendeskBadRequestError(ZendeskError):
     pass
 
-class ZendeskUnauthorized(ZendeskError):
+class ZendeskUnauthorizedError(ZendeskError):
     pass
 
-class ZendeskForbidden(ZendeskError):
+class ZendeskForbiddenError(ZendeskError):
     pass
 
-class ZendeskNotFound(ZendeskError):
+class ZendeskNotFoundError(ZendeskError):
     pass
 
 class ZendeskConflictError(ZendeskError):
@@ -126,19 +126,19 @@ class ZendeskServiceUnavailableError(ZendeskBackoff):
 
 ERROR_CODE_EXCEPTION_MAPPING = {
     400: {
-        "raise_exception": ZendeskBadRequest,
+        "raise_exception": ZendeskBadRequestError,
         "message": "A validation exception has occurred."
     },
     401: {
-        "raise_exception": ZendeskUnauthorized,
+        "raise_exception": ZendeskUnauthorizedError,
         "message": "The access token provided is expired, revoked, malformed or invalid for other reasons."
     },
     403: {
-        "raise_exception": ZendeskForbidden,
+        "raise_exception": ZendeskForbiddenError,
         "message": "You are missing the following required scopes: read"
     },
     404: {
-        "raise_exception": ZendeskNotFound,
+        "raise_exception": ZendeskNotFoundError,
         "message": "The resource you have specified cannot be found."
     },
     409: {

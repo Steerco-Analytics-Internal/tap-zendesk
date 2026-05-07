@@ -315,7 +315,7 @@ class Tickets(CursorBasedExportStream):
         def _fetch_or_404(stream_obj, fetch_fn, ticket_id):
             try:
                 return fetch_fn()
-            except http.ZendeskNotFound:
+            except http.ZendeskNotFoundError:
                 LOGGER.warning(
                     "Unable to retrieve %s for ticket (ID: %s), record not found",
                     stream_obj.name, ticket_id,
@@ -460,8 +460,8 @@ class TicketAudits(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskNotFound:
-            #Skip 404 ZendeskNotFound error as goal is just to check whether TicketComments have read permission or not
+        except http.ZendeskNotFoundError:
+            #Skip 404 ZendeskNotFoundError error as goal is just to check whether TicketComments have read permission or not
             pass
 
 class TicketMetrics(CursorBasedStream):
@@ -491,8 +491,8 @@ class TicketMetrics(CursorBasedStream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskNotFound:
-            #Skip 404 ZendeskNotFound error as goal is just to check whether TicketComments have read permission or not
+        except http.ZendeskNotFoundError:
+            #Skip 404 ZendeskNotFoundError error as goal is just to check whether TicketComments have read permission or not
             pass
 
 class TicketComments(Stream):
@@ -567,8 +567,8 @@ class TicketComments(Stream):
         HEADERS['Authorization'] = 'Bearer {}'.format(self.config["access_token"])
         try:
             http.call_api(url, self.request_timeout, params={'per_page': 1}, headers=HEADERS)
-        except http.ZendeskNotFound:
-            #Skip 404 ZendeskNotFound error as goal is to just check to whether TicketComments have read permission or not
+        except http.ZendeskNotFoundError:
+            #Skip 404 ZendeskNotFoundError error as goal is to just check to whether TicketComments have read permission or not
             pass
 
 class SatisfactionRatings(CursorBasedStream):
